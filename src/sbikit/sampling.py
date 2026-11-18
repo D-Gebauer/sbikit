@@ -43,7 +43,7 @@ from torchemcee.integrations.sbi import flow_log_prob_fn
 from ._utils import ConfigBase, Registry, as_numpy, did_you_mean, logger, resolve_device, to_tensor
 from .priors import Prior
 
-__all__ = ["MCMCConfig", "Posteriors", "sample_posteriors", "LogitBox", "grouped_rhat", "diagnose",
+__all__ = ["MCMCConfig", "Posteriors", "sample_posteriors", "find_map", "LogitBox", "grouped_rhat", "diagnose",
            "MOVES", "MOVE_PRESETS", "register_move"]
 
 
@@ -662,6 +662,77 @@ def _check_transform(tr, priors, n_targets, n_theta, device, seed):
                          f"{n_theta} parameters")
 
 
+def _inputs(likelihood, x_obs, prior, device, transform, seed, targets_per_batch=None):
+    """Checked inputs of :func:`sample_posteriors` and :func:`find_map`.
+
+    Returns the device, ``x_obs`` as a (B, n_x) float32 array, the distinct priors on the device
+    with the index of each target's prior, the (B, 1, P) bounds, the parameter names and the
+    transform on the device."""
+    device = resolve_device(device or getattr(likelihood, "device", "cpu"))
+    if not callable(getattr(likelihood, "log_prob", None)):
+        raise TypeError(f"likelihood must have a log_prob(input, condition) method; got {type(likelihood).__name__}")
+
+    x = as_numpy(x_obs, np.float32)
+    if x.ndim == 1:
+        x = x[None]
+    if x.ndim != 2 or x.size == 0:
+        raise ValueError(f"x_obs must be (B targets, n_x summaries) with at least one row; got shape {x.shape}")
+    bad = np.flatnonzero(~np.isfinite(x).all(1))
+    if len(bad):
+        raise ValueError(f"x_obs contains NaN or inf in {len(bad)} of {len(x)} targets: {_some(bad)}")
+    n_x = _width(likelihood, "n_x")
+    if n_x is not None and x.shape[1] != n_x:
+        raise ValueError(f"x_obs has {x.shape[1]} columns but the likelihood takes {n_x} summaries")
+    B = len(x)
+
+    uniq, which = _group(_as_priors(prior, B))
+    sizes = sorted({int(p.ndim) for p in uniq})
+    if len(sizes) > 1:
+        raise ValueError(f"prior: all priors must have the same number of parameters; got {sizes}")
+    P = sizes[0]
+    named = [[str(n) for n in p.names] for p in uniq if getattr(p, "names", None) is not None]
+    if any(n != named[0] for n in named):
+        raise ValueError("prior: the per-target priors have different parameter names")
+
+    uniq = [p.to(device) for p in uniq]
+    f32 = dict(dtype=torch.float32, device=device)
+    low = torch.stack([to_tensor(uniq[w].low, **f32) for w in which])[:, None]      # (B, 1, P)
+    high = torch.stack([to_tensor(uniq[w].high, **f32) for w in which])[:, None]
+
+    tr = _on_device(transform, device)
+    n_theta = _width(likelihood, "n_theta")
+    if tr is not None:
+        _check_transform(tr, uniq, min(B, targets_per_batch or B), n_theta, device, seed)
+    elif n_theta is not None and P != n_theta:
+        raise ValueError(f"prior has {P} parameters but the likelihood is conditioned on {n_theta}; to sample other "
+                         "parameters pass transform=")
+    return device, x, uniq, which, low, high, (named[0] if named else None), tr
+
+
+def _prior_fn(priors, low, high):
+    """The log prior of (B, n, P) points as a function returning (B, n): ``priors`` holds one prior
+    per target, ``low`` / ``high`` their (B, 1, P) bounds. Evaluated once per distinct object."""
+    uniq, which = _group(priors)
+    if len(uniq) == 1:
+        return uniq[0].log_prob
+    if all(type(p) is Prior and not p.terms and not p.constraints for p in uniq):
+        log_density = -torch.log(high - low).sum(-1)                        # (B, 1): plain boxes, no loop
+
+        def prior_lp(theta):
+            inside = ((theta >= low) & (theta <= high)).all(-1)
+            return torch.where(inside, log_density.to(theta.dtype), -torch.inf)
+        return prior_lp
+    which = to_tensor(which, device=low.device)
+    members = [which == i for i in range(len(uniq))]                        # (B,) masks: the targets of each prior
+
+    def prior_lp(theta):                                                    # one call per distinct prior object
+        out = torch.empty(theta.shape[:2], device=theta.device, dtype=theta.dtype)
+        for p, m in zip(uniq, members):
+            out[m] = p.log_prob(theta[m])
+        return out
+    return prior_lp
+
+
 def _tails(arrays, axis):
     """The arrays cut to their shortest length along ``axis`` (keeping the end), and whether any was cut."""
     n = min(a.shape[axis] for a in arrays)
@@ -741,56 +812,20 @@ def sample_posteriors(likelihood, x_obs, prior: Union[Prior, Sequence[Prior]], c
         >>> post = sample_posteriors(nle, s_obs, prior)          # walkers start from the best prior draws
     """
     cfg = MCMCConfig.make(config)
-    device = resolve_device(device or getattr(likelihood, "device", "cpu"))
-    if not callable(getattr(likelihood, "log_prob", None)):
-        raise TypeError(f"likelihood must have a log_prob(input, condition) method; got {type(likelihood).__name__}")
-
-    x = as_numpy(x_obs, np.float32)
-    if x.ndim == 1:
-        x = x[None]
-    if x.ndim != 2 or x.size == 0:
-        raise ValueError(f"x_obs must be (B targets, n_x summaries) with at least one row; got shape {x.shape}")
-    bad = np.flatnonzero(~np.isfinite(x).all(1))
-    if len(bad):
-        raise ValueError(f"x_obs contains NaN or inf in {len(bad)} of {len(x)} targets: {_some(bad)}")
-    n_x = _width(likelihood, "n_x")
-    if n_x is not None and x.shape[1] != n_x:
-        raise ValueError(f"x_obs has {x.shape[1]} columns but the likelihood takes {n_x} summaries")
-    B = len(x)
-
-    priors = _as_priors(prior, B)
-    uniq, which = _group(priors)
-    sizes = sorted({int(p.ndim) for p in uniq})
-    if len(sizes) > 1:
-        raise ValueError(f"prior: all priors must have the same number of parameters; got {sizes}")
-    P = sizes[0]
-    named = [[str(n) for n in p.names] for p in uniq if getattr(p, "names", None) is not None]
-    if any(n != named[0] for n in named):
-        raise ValueError("prior: the per-target priors have different parameter names")
-    names = named[0] if named else None
+    base_seed = cfg.seed if cfg.seed is not None else int(torch.randint(2 ** 31 - 1, (1,)))
+    device, x, uniq, which, low, high, names, tr = _inputs(likelihood, x_obs, prior, device, transform, base_seed,
+                                                           cfg.targets_per_batch)
+    B, P = len(x), low.shape[-1]
+    per = min(B, cfg.targets_per_batch or B)               # targets per ensemble
+    f32 = dict(dtype=torch.float32, device=device)
     if cfg.nwalkers <= 2 * P:
         raise ValueError(f"MCMCConfig.nwalkers = {cfg.nwalkers} must be larger than twice the number of parameters "
                          f"({P})")
-
-    uniq = [p.to(device) for p in uniq]
-    f32 = dict(dtype=torch.float32, device=device)
-    low = torch.stack([to_tensor(uniq[w].low, **f32) for w in which])[:, None]      # (B, 1, P)
-    high = torch.stack([to_tensor(uniq[w].high, **f32) for w in which])[:, None]
     bounded = torch.isfinite(high - low)[:, 0]                                             # (B, P)
     if cfg.logit_box and not bool(bounded.all()):
         cols = torch.nonzero(~bounded.all(0)).flatten().tolist()
         raise ValueError(f"the prior has infinite bounds (parameter columns {cols}), which the logit box cannot "
                          "map: sample with MCMCConfig(logit_box=False)")
-
-    tr = _on_device(transform, device)
-    n_theta = _width(likelihood, "n_theta")
-    base_seed = cfg.seed if cfg.seed is not None else int(torch.randint(2 ** 31 - 1, (1,)))
-    per = min(B, cfg.targets_per_batch or B)               # targets per ensemble
-    if tr is not None:
-        _check_transform(tr, uniq, per, n_theta, device, base_seed)
-    elif n_theta is not None and P != n_theta:
-        raise ValueError(f"prior has {P} parameters but the likelihood is conditioned on {n_theta}; to sample other "
-                         "parameters pass transform=")
 
     mode = cfg.init
     if mode == "auto":
@@ -895,20 +930,7 @@ def _sample_batch(likelihood, x_obs, priors, low, high, cfg, mode, centre, sd, w
     which = to_tensor(which, device=device)
     members = [which == i for i in range(len(uniq))]                        # (B,) masks: the targets of each prior
 
-    if len(uniq) == 1:
-        prior_lp = uniq[0].log_prob                                         # (B, n, P) -> (B, n)
-    elif all(type(p) is Prior and not p.terms and not p.constraints for p in uniq):
-        log_density = -torch.log(high - low).sum(-1)                        # (B, 1): plain boxes, no loop
-
-        def prior_lp(theta):
-            inside = ((theta >= low) & (theta <= high)).all(-1)
-            return torch.where(inside, log_density.to(theta.dtype), -torch.inf)
-    else:
-        def prior_lp(theta):                                                # one call per distinct prior object
-            out = torch.empty(theta.shape[:2], device=theta.device, dtype=theta.dtype)
-            for p, m in zip(uniq, members):
-                out[m] = p.log_prob(theta[m])
-            return out
+    prior_lp = _prior_fn(priors, low, high)                                 # (B, n, P) -> (B, n)
 
     like = flow_log_prob_fn(likelihood, x_obs)
     if tr is not None:
@@ -1080,3 +1102,126 @@ def _sample_batch(likelihood, x_obs, priors, low, high, cfg, mode, centre, sd, w
                     f"rhat_max {out['rhat_max'].max():.4f}, ess_min {out['ess_min'].min():.0f}, "
                     f"{out['seconds']:.0f}s")
     return result
+
+
+# ------------------------------------------------------------------------------ posterior maximum
+_MAP_ROWS = 1 << 16     # start points per likelihood call when the best ones are selected
+
+
+def find_map(likelihood, x_obs, prior: Union[Prior, Sequence[Prior]], init, n_starts: int = 16, steps: int = 300,
+             lr: float = 0.1, scale=None, device=None, transform=None) -> tuple:
+    """The maximum of the posterior p(theta | x_b) for every row b of ``x_obs``, all in one batch.
+
+    Adam ascent on log likelihood + log prior from the ``n_starts`` start points of each target
+    with the highest posterior density. The points stay inside the prior box, so a maximum on its
+    edge is found, and the best point visited inside the prior support is returned.
+
+    Args:
+        likelihood, x_obs, prior, device, transform: as in :func:`sample_posteriors`.
+        init: start points in the sampled parameters: (B, S, P), e.g. ``Posteriors.samples``;
+            (B, P) for one start per target; (S, P) for a single target.
+        n_starts: number of start points per target that are optimised.
+        steps: number of Adam steps.
+        lr: largest step, in units of ``scale``.
+        scale: length scale of every parameter, (P,) or (B, P). Default: the covariance of each
+            target's start points, so that for posterior samples the steps follow the widths and
+            the degeneracies of the posterior; with fewer than 4 P start points the prior box
+            width / sqrt(12). A scale far below the distance to the maximum makes the ascent slow.
+
+    Returns:
+        ``(theta, log_prob)``: the (B, P) maxima in the sampled parameters and their (B,) log
+        posterior density (log prior + log likelihood, unnormalised, as ``Posteriors.log_prob``).
+
+    Raises:
+        ValueError: for inputs whose shapes do not fit together, for a target without a start
+            point of finite posterior density, and if ``scale`` is needed but not given.
+
+    Example:
+        >>> post = sample_posteriors(nle, s_obs, prior)
+        >>> theta_map, log_prob = find_map(nle, s_obs, prior, post.samples)
+    """
+    device, x, uniq, which, low, high, _, tr = _inputs(likelihood, x_obs, prior, device, transform, 0)
+    B, P = len(x), low.shape[-1]
+    f32 = dict(dtype=torch.float32, device=device)
+    if not (isinstance(n_starts, int) and n_starts >= 1 and isinstance(steps, int) and steps >= 0 and lr > 0):
+        raise ValueError(f"n_starts must be an int >= 1, steps an int >= 0 and lr positive; got {n_starts!r}, "
+                         f"{steps!r}, {lr!r}")
+
+    start = as_numpy(init, np.float32)
+    shape = start.shape
+    if start.ndim == 2:
+        start = start[None] if B == 1 else start[:, None]
+    if start.ndim != 3 or start.shape[0] != B or start.shape[1] == 0 or start.shape[2] != P:
+        raise ValueError(f"init must have shape ({B}, S, {P}) (targets x start points x parameters), ({B}, {P}) for "
+                         f"one start point per target, or (S, {P}) for a single target; got {shape}")
+    if not np.isfinite(start).all():
+        raise ValueError("init contains NaN or inf")
+    origin = to_tensor(start, **f32)
+    chol = None                                            # (B, P, P): theta = origin + chol v, with steps of lr in v
+    if scale is not None:
+        sd = _per_target(scale, "scale", B, P, scalar=True)
+        if not (sd > 0).all():
+            raise ValueError("scale must be positive")
+    else:
+        if origin.shape[1] >= 4 * P:
+            r = origin - origin.mean(1, keepdim=True)
+            with contextlib.suppress(np.linalg.LinAlgError):
+                chol = np.linalg.cholesky((r.mT @ r).cpu().numpy().astype(np.float64) / (origin.shape[1] - 1))
+        if chol is None:
+            sd = ((high - low)[:, 0] / 12 ** 0.5).cpu().numpy().astype(np.float64)
+            if not np.isfinite(sd).all():
+                raise ValueError("scale is needed: there are too few start points to take it from, and the prior "
+                                 "box is infinite")
+    if chol is None:
+        chol = sd[:, :, None] * np.eye(P)
+    chol = to_tensor(chol, **f32)[:, None]                                    # (B, 1, P, P)
+
+    def to_theta(v):
+        return torch.minimum(torch.maximum(origin + (chol @ v[..., None])[..., 0], low), high)
+
+    prior_lp = _prior_fn([uniq[w] for w in which], low, high)
+    like = flow_log_prob_fn(likelihood, to_tensor(x, **f32))
+    if tr is not None:
+        like_theta = like
+
+        def like(psi):
+            return like_theta(tr(psi))
+
+    if origin.shape[1] > n_starts:
+        with torch.no_grad():
+            cols = max(1, _MAP_ROWS // B)
+            value = torch.cat([prior_lp(origin[:, i:i + cols]) + like(origin[:, i:i + cols])
+                               for i in range(0, origin.shape[1], cols)], 1)
+            best = torch.nan_to_num(value, nan=-torch.inf).topk(n_starts, dim=1).indices
+            origin = origin.gather(1, best[..., None].expand(-1, -1, P))
+
+    # steps in v, with theta cut to the prior box
+    v = torch.zeros_like(origin, requires_grad=True)
+    optimiser = torch.optim.Adam([v], lr=lr)
+    best = torch.full(origin.shape[:2], -torch.inf, device=device)
+    best_theta = origin.clone()
+    for step in range(steps + 1):
+        with torch.set_grad_enabled(step < steps):
+            theta = to_theta(v)
+            lp, ll = prior_lp(theta), like(theta)
+        with torch.no_grad():
+            value = ll + lp
+            better = torch.isfinite(value) & (value > best)
+            best = torch.where(better, value, best)
+            best_theta = torch.where(better[..., None], theta, best_theta)
+            if step == steps:
+                break
+        # outside the support (constraints) the prior is -inf and only the likelihood gives a direction
+        loss = -(ll + torch.where(torch.isfinite(lp), lp, torch.zeros_like(lp))).sum()
+        v.grad = torch.nan_to_num(torch.autograd.grad(loss, v)[0], nan=0.0, posinf=0.0, neginf=0.0)
+        optimiser.step()
+        with torch.no_grad():
+            v.copy_(torch.linalg.solve_triangular(chol, (to_theta(v) - origin)[..., None], upper=False)[..., 0])
+
+    value, pick = best.max(1)
+    if not bool(torch.isfinite(value).all()):
+        raise ValueError(f"no start point with a finite posterior density for targets "
+                         f"{_some(torch.nonzero(~torch.isfinite(value)).flatten())}: give init inside the prior "
+                         "support, where the likelihood is defined")
+    theta = best_theta.gather(1, pick[:, None, None].expand(-1, 1, P))[:, 0]
+    return theta.cpu().numpy().astype(np.float64), value.cpu().numpy().astype(np.float64)

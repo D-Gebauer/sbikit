@@ -9,6 +9,8 @@ their calibration.
 - **Sampling**: all observations or test simulations in one batched `torchemcee` ensemble on CPU or GPU, stopped
   by convergence checks.
 - **Metrics**: TARP, marginal coverage, figures of merit, importance reweighting between priors.
+- **Goodness of fit**: posterior maxima, χ² of the learned likelihood, posterior predictive tests calibrated on
+  simulations.
 - **Hyperparameter searches** with Optuna.
 - **Utilities**: priors with density terms and constraints, parameter transforms, blinding, checkpoints, run
   records.
@@ -239,6 +241,8 @@ post.save("posteriors.npz"); post = sk.Posteriors.load("posteriors.npz")
   weighted list such as `[["de", 0.8], ["gaussian", 0.2, {"cov": 0.01}]]`.
 - By default walkers move in the logit of the prior box (`logit_box=False` turns that off).
 - `keep_chain=True` also returns `post.chain` and `post.log_prob`; `init_walkers=post.chain[-1]` continues a run.
+- `sk.find_map(nle, s_obs, prior, post.samples)` returns the maximum of every posterior and its log density,
+  starting from the best of the given points.
 - Any object with `log_prob(input, condition)` in `sbi`'s layout can be the likelihood.
 
 ### Parameter transforms
@@ -281,6 +285,34 @@ record, arrays = evaluate(post.samples, theta[te], names,
   `bounds=(low, high)`.
 - Also available separately: `tarp_f`, `ecp_curve`, `tarp_scalars`, `marginal_coverage`, `posterior_summary`,
   `log_fom`, `effective_sample_size`, `importance_weights(samples, from_prior, to_prior)`.
+
+### Goodness of fit
+
+```python
+from sbikit.gof import likelihood_chi2, predictive_statistic, calibrated_pvalue
+
+# the learned likelihood on test simulations at their true parameters
+chi2 = likelihood_chi2(nle, s[te], theta[te])            # (n_test,); χ²(n) if the likelihood is Gaussian
+
+# an observation at its posterior maximum
+theta_map, log_prob = sk.find_map(nle, s_obs, prior, obs.samples)
+chi2_obs = likelihood_chi2(nle, s_obs, theta_map)
+
+# posterior predictive test of the observation against the test simulations
+t_obs = predictive_statistic(nle, s_obs, obs.samples)    # −2 ⟨log p(s | θ)⟩ over the posterior samples
+t_ref = predictive_statistic(nle, s[te], post.samples)
+p = calibrated_pvalue(t_obs, t_ref)                      # fraction of the simulations that fit worse
+```
+
+- `likelihood_chi2` is the squared distance of the summaries from the mean of the likelihood at `theta`, in units
+  of its covariance; both are estimated from `n_draws` draws of the flow.
+- No statistic of a flow has a known distribution: compare the value of an observation with the same statistic of
+  simulations (`calibrated_pvalue`). Realisations at one parameter point give a sharper reference than
+  simulations from the whole prior.
+- With the posterior samples of another analysis (part of the data vector removed, another statistic),
+  `predictive_statistic` tests whether the two are consistent.
+- `columns=[...]` restricts a statistic to some summaries, e.g. to leave out those of parameters the flow is not
+  conditioned on.
 
 ### Hyperparameter searches
 
@@ -384,7 +416,7 @@ torchemcee `Move` in `MCMCConfig(moves=...)`. Only saving them needs the registe
 ## Tests
 
 ```bash
-python -m pytest                    # 310 tests on the CPU
+python -m pytest                    # 325 tests on the CPU
 python -m pytest --device cuda      # on the GPU
 python -m pytest -m "not slow"      # skip the longest tests
 ```
@@ -399,6 +431,7 @@ python -m pytest -m "not slow"      # skip the longest tests
 - Papamakarios, Pavlakou & Murray (2017), *Masked autoregressive flow for density estimation*; Durkan et al. (2019), *Neural spline flows*
 - Foreman-Mackey et al. (2013), *emcee: The MCMC hammer*; ter Braak & Vrugt (2008), *Differential Evolution Markov Chain with snooker updater and fewer chains*
 - Lemos et al. (2023), *Sampling-based accuracy testing of posterior estimators for general inference* (TARP)
+- Doux et al. (2021), *Dark Energy Survey internal consistency tests of the joint cosmological probe analysis with posterior predictive distributions*
 - Hartlap, Simon & Schneider (2007), *Why your model parameter confidences might be too optimistic*
 - Akiba et al. (2019), *Optuna: A next-generation hyperparameter optimization framework*
 - Tejero-Cantero et al. (2020), *sbi: A toolkit for simulation-based inference*; Rozet et al., *zuko: Normalizing flows in PyTorch*

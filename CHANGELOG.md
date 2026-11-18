@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `sk.find_map`: the maximum of every posterior, batched over targets, from the best of the given start points.
+- `sbikit.gof`: `likelihood_chi2` (distance of summaries from the learned likelihood), `predictive_statistic`
+  (posterior predictive tests of goodness of fit and consistency, on all or some summaries) and
+  `calibrated_pvalue` (the place of a statistic among simulations).
+- `Ensemble.sample`.
+
 ## 0.2.0
 
 Checkpoints written by 0.1.0 load unchanged. Results for a given seed differ from 0.1.0 wherever noted.

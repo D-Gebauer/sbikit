@@ -826,6 +826,14 @@ class Ensemble(_Likelihood):
         log_w = torch.log(to_tensor(self.weights, dtype=lp.dtype, device=lp.device))
         return torch.logsumexp(lp + log_w.reshape(-1, *[1] * (lp.ndim - 1)), 0)
 
+    def sample(self, theta, n: int = 1, seed: Optional[int] = None) -> np.ndarray:
+        """Summaries drawn from the mixture, every draw from a member picked with its weight; same
+        arguments and (n, M, n_x) result as :meth:`NLE.sample`."""
+        with seeded(seed):
+            draws = np.stack([m.sample(theta, n) for m in self.members])               # (K, n, M, n_x)
+            pick = torch.multinomial(to_tensor(self.weights), draws[0, ..., 0].size, replacement=True)
+        return np.take_along_axis(draws, pick.numpy().reshape(1, *draws.shape[1:3], 1), 0)[0]
+
     def to(self, device):
         """Move every member to ``device``; returns itself."""
         for m in self.members:

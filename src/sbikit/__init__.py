@@ -6,9 +6,10 @@ The pieces of a neural-likelihood analysis, each usable on its own:
 - :mod:`sbikit.compress`: MOPED, MSE, VMIM, hierarchical VMIM and IMNN compression;
 - :mod:`sbikit.nle`: neural likelihood estimation with normalising flows, and ensembles;
 - :mod:`sbikit.priors`: box priors with density terms and support constraints;
-- :mod:`sbikit.sampling`: batched, convergence-checked ensemble MCMC on CPU or GPU;
+- :mod:`sbikit.sampling`: batched, convergence-checked ensemble MCMC on CPU or GPU, posterior maxima;
 - :mod:`sbikit.transforms`: parameter maps between the sampled and the learned parameters;
 - :mod:`sbikit.metrics`: TARP, marginal coverage, figures of merit, importance reweighting;
+- :mod:`sbikit.gof`: goodness of fit of the learned likelihood and of observations;
 - :mod:`sbikit.hpt`: Optuna hyperparameter searches for compressors and flows;
 - :mod:`sbikit.blinding`: parameter-level blinding of posterior samples;
 - :mod:`sbikit.io`: checkpoints and run records.
@@ -29,18 +30,19 @@ if "tensorflow" not in _sys.modules:
     _sys.modules.setdefault("tensorboard.compat.notf", _types.ModuleType("tensorboard.compat.notf"))
 
 from ._utils import NotFittedError, _setup_logging, resolve_device, set_verbosity
-from . import blinding, compress, hpt, io, metrics, transforms
+from . import blinding, compress, gof, hpt, io, metrics, transforms
 from .data import Dataset, FiducialSet, Splits, random_splits, resolve_splits
 from .io import load, read_meta, run_record, save
 from .nle import NLE, Ensemble, FlowConfig, TrainConfig, register_flow
 from .priors import KDE, CurveBound2D, Gaussian, Polygon2D, Prior, register_constraint, register_term
-from .sampling import MCMCConfig, Posteriors, register_move, sample_posteriors
+from .sampling import MCMCConfig, Posteriors, find_map, register_move, sample_posteriors
 from .scaling import RobustAsinh, ZScore, register_scaler
 from .transforms import Columns, Identity, Transform
 
 __all__ = ["Dataset", "FiducialSet", "Splits", "random_splits", "resolve_splits", "NLE", "Ensemble", "FlowConfig",
            "TrainConfig", "Prior", "Gaussian", "KDE", "Polygon2D", "CurveBound2D", "MCMCConfig", "Posteriors",
-           "sample_posteriors", "ZScore", "RobustAsinh", "compress", "hpt", "io", "metrics", "load", "save",
+           "sample_posteriors", "find_map", "ZScore", "RobustAsinh", "compress", "gof", "hpt", "io", "metrics", "load",
+           "save",
            "run_record", "read_meta", "blinding", "transforms", "Transform", "Identity", "Columns", "set_verbosity",
            "resolve_device", "NotFittedError", "register_flow", "register_scaler", "register_term",
            "register_constraint", "register_move"]
