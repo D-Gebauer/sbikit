@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sbikit"
-version = "0.1.0"
+version = "0.2.0"
 description = "Simulation-based inference for cosmology: compression (MOPED, MSE, VMIM, hierarchical VMIM, IMNN), neural likelihood estimation, batched GPU ensemble MCMC, TARP and figure-of-merit metrics, Optuna hyperparameter searches"
 readme = "README.md"
 requires-python = ">=3.11"

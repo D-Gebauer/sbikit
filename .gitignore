@@ -13,3 +13,5 @@ outputs/
 *.npz
 *.db
 *.log
+!tests/data/**/*.pt
+!tests/data/**/*.npz

@@ -14,11 +14,11 @@ All share the :class:`Compressor` interface: ``fit(...)`` returns a validation l
 compressor maps data vectors to summaries, and ``state()`` / :func:`compressor_from_state`
 (or :func:`sbikit.io.save` / :func:`sbikit.io.load`) store and restore it.
 """
-from .base import REGISTRY, Compressor, compressor_from_state
+from .base import NETWORKS, REGISTRY, Compressor, compressor_from_state, register, register_network
 from .hierarchical import HierarchicalVMIM
 from .imnn import IMNN, IMNNConfig
 from .moped import MOPED, hartlap_factor, moped_vectors, moped_vectors_pivoted
 from .nets import MDN, MSECompressor, Net, NetConfig, VMIMCompressor
 
-__all__ = ["Compressor", "REGISTRY", "compressor_from_state", "MOPED", "moped_vectors", "moped_vectors_pivoted", "hartlap_factor",
+__all__ = ["Compressor", "REGISTRY", "register", "compressor_from_state", "NETWORKS", "register_network", "MOPED", "moped_vectors", "moped_vectors_pivoted", "hartlap_factor",
            "MSECompressor", "VMIMCompressor", "NetConfig", "Net", "MDN", "HierarchicalVMIM", "IMNN", "IMNNConfig"]

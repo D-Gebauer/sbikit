@@ -15,7 +15,7 @@ The pieces of a neural-likelihood analysis, each usable on its own:
 
 The most used classes and functions are re-exported here (``import sbikit as sk``).
 """
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 import sys as _sys
 import types as _types
@@ -28,16 +28,21 @@ import types as _types
 if "tensorflow" not in _sys.modules:
     _sys.modules.setdefault("tensorboard.compat.notf", _types.ModuleType("tensorboard.compat.notf"))
 
+from ._utils import NotFittedError, _setup_logging, resolve_device, set_verbosity
 from . import blinding, compress, hpt, io, metrics, transforms
 from .data import Dataset, FiducialSet, Splits, random_splits, resolve_splits
-from .io import load, run_record, save
-from .nle import NLE, Ensemble, FlowConfig, TrainConfig
-from .priors import KDE, CurveBound2D, Gaussian, Polygon2D, Prior
-from .sampling import MCMCConfig, Posteriors, sample_posteriors
-from .scaling import RobustAsinh, ZScore
+from .io import load, read_meta, run_record, save
+from .nle import NLE, Ensemble, FlowConfig, TrainConfig, register_flow
+from .priors import KDE, CurveBound2D, Gaussian, Polygon2D, Prior, register_constraint, register_term
+from .sampling import MCMCConfig, Posteriors, register_move, sample_posteriors
+from .scaling import RobustAsinh, ZScore, register_scaler
 from .transforms import Columns, Identity, Transform
 
 __all__ = ["Dataset", "FiducialSet", "Splits", "random_splits", "resolve_splits", "NLE", "Ensemble", "FlowConfig",
            "TrainConfig", "Prior", "Gaussian", "KDE", "Polygon2D", "CurveBound2D", "MCMCConfig", "Posteriors",
            "sample_posteriors", "ZScore", "RobustAsinh", "compress", "hpt", "io", "metrics", "load", "save",
-           "run_record", "blinding", "transforms", "Transform", "Identity", "Columns"]
+           "run_record", "read_meta", "blinding", "transforms", "Transform", "Identity", "Columns", "set_verbosity",
+           "resolve_device", "NotFittedError", "register_flow", "register_scaler", "register_term",
+           "register_constraint", "register_move"]
+
+_setup_logging()
