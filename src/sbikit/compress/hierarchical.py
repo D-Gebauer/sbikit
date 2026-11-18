@@ -70,10 +70,10 @@ class HierarchicalVMIM(Compressor):
             keys that are not stage names.
 
     Example:
-        >>> blocks = {"xi_plus": range(0, 20), "xi_minus": range(20, 40), "peaks": range(40, 55)}
+        >>> blocks = {"first": range(0, 20), "second": range(20, 40), "third": range(40, 55)}
         >>> shared = {"epochs": 200}
-        >>> h = HierarchicalVMIM(blocks, anchor=["xi_plus"], n_out=3,
-        ...                      orders=[["xi_minus", "peaks"], ["peaks", "xi_minus"]],
+        >>> h = HierarchicalVMIM(blocks, anchor=["first"], n_out=3,
+        ...                      orders=[["second", "third"], ["third", "second"]],
         ...                      configs={"default": shared, "final": {**shared, "vicreg": 0.1}})
         >>> h.fit(x_train, theta_train, x_val, theta_val)
         >>> s = h(x)                                      # (N, 3)

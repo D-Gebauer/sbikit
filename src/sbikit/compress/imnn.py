@@ -43,7 +43,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .._utils import ConfigBase, logger, parse_widths, plain, resolve_device, seeded, unknown
+from .._utils import ConfigBase, logger, parse_widths, plain, resolve_device, seeded, to_tensor, unknown
 from ..data import FiducialSet
 from ..scaling import SCALERS, Identity, make_scaler, scaler_from_state
 from .base import NETWORKS, Compressor, register
@@ -371,7 +371,7 @@ class IMNN(Compressor):
         return NETWORKS[self.config.network](n_in, n_summaries, self.config)
 
     def _scale(self, x):
-        return torch.as_tensor(np.asarray(self.in_scaler(np.asarray(x, dtype=np.float64))), dtype=torch.float32)
+        return to_tensor(np.asarray(self.in_scaler(np.asarray(x, dtype=np.float64))), dtype=torch.float32)
 
     def _tensors(self, s):
         return (self._scale(s.x).to(self.device), self._scale(s.x_plus).to(self.device),
@@ -437,7 +437,7 @@ class IMNN(Compressor):
         self.net, self.history, self.iterations, self.val_loss = None, [], 0, float("inf")
         best, best_state = -np.inf, None
         with seeded(self.seed):
-            delta = torch.as_tensor(trn.delta, dtype=torch.float32, device=dev)
+            delta = to_tensor(trn.delta, dtype=torch.float32, device=dev)
             xf, xp, xm = self._tensors(trn)
             xv = self._tensors(val) if val is not None else None
             self.n_in = xf.shape[1]
@@ -541,11 +541,11 @@ class IMNN(Compressor):
     def _finalise(self):
         """mu, C, dmu, F for the estimator: on the validation set if given (imnn ``set_F_statistics``)."""
         s = self.validation if self.validation is not None else self.fiducial
-        delta = torch.as_tensor(s.delta, dtype=torch.float64)
+        delta = to_tensor(s.delta, dtype=torch.float64)
         with torch.no_grad():
             t = [self._summaries(a).double().cpu() for a in (s.x, s.x_plus, s.x_minus)]
         self.fisher, self.cov, _, self.dmu, self.mu = fisher_statistics(*t, delta)
-        self.theta_fid = torch.as_tensor(s.theta_fid, dtype=torch.float64).clone()
+        self.theta_fid = to_tensor(s.theta_fid, dtype=torch.float64).clone()
 
     @property
     def train_history(self) -> list:
@@ -630,7 +630,7 @@ class IMNN(Compressor):
         m.net.to(m.device).eval()
         m.in_scaler = scaler_from_state(state["in_scaler"])
         for k in ("mu", "cov", "dmu", "fisher", "theta_fid"):      # copies, on the CPU as __call__ uses them
-            setattr(m, k, torch.as_tensor(state[k], dtype=torch.float64).detach().cpu().clone())
+            setattr(m, k, to_tensor(state[k], dtype=torch.float64).detach().cpu().clone())
         m.iterations, m.val_loss = state.get("iterations"), state.get("val_loss")
         return m
 

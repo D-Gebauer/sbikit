@@ -3,6 +3,7 @@ import json
 import math
 import resource
 import time
+import warnings
 
 import numpy as np
 import pytest
@@ -671,3 +672,21 @@ def test_make_key_validation(tmp_path):
     (tmp_path / "text").write_text("hello")
     with pytest.raises(ValueError, match="not a blinding key"):
         Blinder(tmp_path / "text")
+
+
+def test_read_only_arrays_give_no_warning():
+    def ro(a):
+        a = np.array(a, dtype=np.float32)
+        a.setflags(write=False)
+        return a
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        prior = Prior(ro([0, 0]), ro([1, 1]), names=["a", "b"],
+                      terms=[Gaussian(["a"], ro([0.5]), ro([[0.04]]))],
+                      constraints=[Polygon2D(["a", "b"], ro([[0, 0], [1, 0], [1, 1], [0, 1]])),
+                                   CurveBound2D.from_function(["a", "b"], lambda a: a - 2, 0.0, 1.0)])
+        assert np.isfinite(prior.log_prob(ro([[0.5, 0.5]]))).all()
+        assert np.isfinite(Prior(ro([0, 0]), ro([1, 1]), terms=[KDE([0, 1], ro(np.random.default_rng(0).uniform(0, 1, (200, 2))),
+                                                                bandwidth=0.3)])
+                           .log_prob(ro([[0.5, 0.5]]))).all()

@@ -49,7 +49,7 @@ import torch
 from optuna.trial import TrialState
 
 from ._utils import (as_2d, as_numpy, check_finite, check_pair, did_you_mean, logger, parse_widths, resolve_device,
-                     seeded, unknown)
+                     seeded, to_tensor, unknown)
 from .io import _jsonable, _write_json, load, save
 from .metrics import evaluate, importance_weights, log_fom
 from .nle import NLE, FlowConfig, TrainConfig
@@ -649,7 +649,7 @@ def _objective_fom(samples, ev: EvalSet, fom_idx):
         lf = log_fom(samples, fom_idx)
     else:
         w = importance_weights(samples, ev.prior, ev.fom_prior)
-        truth = torch.as_tensor(as_numpy(ev.truth), dtype=torch.float32, device=getattr(ev.fom_prior, "device", "cpu"))
+        truth = to_tensor(as_numpy(ev.truth), dtype=torch.float32, device=getattr(ev.fom_prior, "device", "cpu"))
         lf = log_fom(samples, fom_idx, w)[as_numpy(ev.fom_prior.inside(truth), bool)]
     nan = np.isnan(lf)
     if nan.all():

@@ -3,8 +3,8 @@
 The flow is conditioned on theta (the labels of the training simulations); the sampler moves in
 psi (the parameters of the model being inferred), with the prior on psi. Typical uses:
 
-- a flow trained on one intrinsic-alignment amplitude per tomographic bin, inferred with a
-  few-parameter model that predicts those amplitudes;
+- a flow trained on several free amplitudes, inferred with a model of fewer parameters that
+  predicts those amplitudes;
 - reparametrisations (e.g. sample S8 instead of sigma8) without retraining.
 
 A transform acts on torch tensors (..., P_in) -> (..., P_out). It is called under ``no_grad`` (it

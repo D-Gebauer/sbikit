@@ -28,7 +28,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .._utils import (ConfigBase, as_2d, check_pair, did_you_mean, holdout_split, logger, parse_widths, plain,
-                      resolve_device, seeded)
+                      resolve_device, seeded, to_tensor)
 from ..scaling import SCALERS, ZScore, make_scaler, scaler_from_state
 from .base import NETWORKS, Compressor, register
 
@@ -329,7 +329,7 @@ class NetCompressor(Compressor):
 
     # --
     def _scale_in(self, x):
-        return torch.as_tensor(np.asarray(self.in_scaler(np.asarray(x, dtype=np.float64))), dtype=torch.float32)
+        return to_tensor(np.asarray(self.in_scaler(np.asarray(x, dtype=np.float64))), dtype=torch.float32)
 
     def _schedule(self, opt, total_steps: int):
         """The learning-rate scheduler (stepped once per minibatch), or None for a constant rate."""
@@ -407,13 +407,13 @@ class NetCompressor(Compressor):
         self.in_scaler = make_scaler(c.input_scaling, **kw).fit(x)
         self.t_scaler = ZScore().fit(theta)
         xt, xv = self._scale_in(x).to(dev), self._scale_in(x_val).to(dev)
-        tt = torch.as_tensor(np.asarray(self.t_scaler(theta)), dtype=torch.float32, device=dev)
-        tv = torch.as_tensor(np.asarray(self.t_scaler(theta_val)), dtype=torch.float32, device=dev)
+        tt = to_tensor(np.asarray(self.t_scaler(theta)), dtype=torch.float32, device=dev)
+        tv = to_tensor(np.asarray(self.t_scaler(theta_val)), dtype=torch.float32, device=dev)
         jitter = []                      # (mask over training rows, column, half width in z-units)
         for col, value, half in atoms:
             mask = theta[:, col].astype(np.float32) == np.float32(value)      # equal to single precision
             if mask.any():
-                jitter.append((torch.as_tensor(mask, device=dev), col, float(half / self.t_scaler.std[col])))
+                jitter.append((to_tensor(mask, device=dev), col, float(half / self.t_scaler.std[col])))
             else:
                 nearest = float(theta[np.argmin(np.abs(theta[:, col] - value)), col])
                 warnings.warn(f"{name}: atoms: no training row has theta[:, {col}] == {value!r} (the closest label "

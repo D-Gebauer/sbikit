@@ -38,7 +38,7 @@ from typing import Callable, Mapping, Optional, Sequence
 import numpy as np
 import torch
 
-from ._utils import as_numpy, did_you_mean, resolve_device
+from ._utils import as_numpy, did_you_mean, resolve_device, to_tensor
 
 __all__ = ["tarp_f", "ecp_curve", "tarp_scalars", "marginal_coverage", "posterior_summary", "log_fom",
            "importance_weights", "effective_sample_size", "evaluate"]
@@ -236,12 +236,12 @@ def tarp_f(samples, truth, n_references: int = 50, seed0: Optional[int] = 0, dev
         raise ValueError(f"n_references and chunk must be at least 1, got {n_references} and {chunk}")
     device = resolve_device(device)
     device = "cpu" if torch.device(device).type == "mps" else device
-    s = torch.as_tensor((samples - low) / width, device=device)
-    t = torch.as_tensor((truth - low) / width, device=device)
+    s = to_tensor((samples - low) / width, device=device)
+    t = to_tensor((truth - low) / width, device=device)
     out = np.empty((n_references, n_sims))
     for r in range(n_references):
         rng = np.random.RandomState(None if seed0 is None else seed0 + r)
-        ref = torch.as_tensor(refs[r] if references is not None else rng.uniform(0, 1, size=(n_sims, d)), device=device)
+        ref = to_tensor(refs[r] if references is not None else rng.uniform(0, 1, size=(n_sims, d)), device=device)
         d_t = torch.sqrt(((ref - t) ** 2).sum(-1))
         for i in range(0, n_sims, chunk):
             d_s = torch.sqrt(((ref[i:i + chunk, None] - s[i:i + chunk]) ** 2).sum(-1))
@@ -553,7 +553,7 @@ def importance_weights(samples, from_prior, to_prior) -> np.ndarray:
         if not hasattr(prior, "log_prob"):
             raise TypeError(f"importance_weights: {name} must be one prior with log_prob, got "
                             f"{type(prior).__name__}; for a prior per simulation, call it per simulation")
-    th = torch.as_tensor(samples.reshape(-1, samples.shape[-1]), dtype=torch.float32)
+    th = to_tensor(samples.reshape(-1, samples.shape[-1]), dtype=torch.float32)
     fp, tp = from_prior.to("cpu"), to_prior.to("cpu")
     with torch.no_grad():
         lw = torch.cat([tp.log_prob(c) - fp.log_prob(c) for c in th.split(1 << 16)])

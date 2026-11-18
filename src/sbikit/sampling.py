@@ -40,7 +40,7 @@ import torch.nn.functional as F
 import torchemcee
 from torchemcee.integrations.sbi import flow_log_prob_fn
 
-from ._utils import ConfigBase, Registry, as_numpy, did_you_mean, logger, resolve_device
+from ._utils import ConfigBase, Registry, as_numpy, did_you_mean, logger, resolve_device, to_tensor
 from .priors import Prior
 
 __all__ = ["MCMCConfig", "Posteriors", "sample_posteriors", "LogitBox", "grouped_rhat", "diagnose",
@@ -475,7 +475,7 @@ class LogitBox:
 
 def _as_chain(chain) -> torch.Tensor:
     """``chain`` as a floating (n, B, W, P) tensor (arrays are converted, tensors stay on their device)."""
-    chain = torch.as_tensor(chain)
+    chain = to_tensor(chain)
     if not chain.is_floating_point():
         chain = chain.to(torch.float32)
     if chain.dim() != 4:
@@ -540,7 +540,7 @@ def diagnose(chain, accepted, nsteps, cfg=None):
     cfg = MCMCConfig.make(cfg)
     chain = _as_chain(chain)
     n, n_targets, nwalkers, ndim = chain.shape
-    accepted = torch.as_tensor(accepted, device=chain.device)
+    accepted = to_tensor(accepted, device=chain.device)
     if accepted.shape != (n_targets, nwalkers):
         raise ValueError(f"accepted must have shape ({n_targets}, {nwalkers}) (targets x walkers of chain); got "
                          f"{tuple(accepted.shape)}")
@@ -649,7 +649,7 @@ def _check_transform(tr, priors, n_targets, n_theta, device, seed):
             raise ValueError(f"transform expects the parameters {list(names_in)}, the prior has {list(names)}; the "
                              "prior must be on the transform's inputs, in the same order")
     gen = torch.Generator(device=device).manual_seed(int(seed))
-    psi = torch.as_tensor(priors[0].sample(2 * n_targets, generator=gen), dtype=torch.float32, device=device)
+    psi = to_tensor(priors[0].sample(2 * n_targets, generator=gen), dtype=torch.float32, device=device)
     psi = psi.reshape(n_targets, 2, -1)                    # the layout of the sampler: (targets, walkers, P)
     with torch.no_grad():
         theta = tr(psi)
@@ -774,8 +774,8 @@ def sample_posteriors(likelihood, x_obs, prior: Union[Prior, Sequence[Prior]], c
 
     uniq = [p.to(device) for p in uniq]
     f32 = dict(dtype=torch.float32, device=device)
-    low = torch.stack([torch.as_tensor(uniq[w].low, **f32) for w in which])[:, None]      # (B, 1, P)
-    high = torch.stack([torch.as_tensor(uniq[w].high, **f32) for w in which])[:, None]
+    low = torch.stack([to_tensor(uniq[w].low, **f32) for w in which])[:, None]      # (B, 1, P)
+    high = torch.stack([to_tensor(uniq[w].high, **f32) for w in which])[:, None]
     bounded = torch.isfinite(high - low)[:, 0]                                             # (B, P)
     if cfg.logit_box and not bool(bounded.all()):
         cols = torch.nonzero(~bounded.all(0)).flatten().tolist()
@@ -837,7 +837,7 @@ def sample_posteriors(likelihood, x_obs, prior: Union[Prior, Sequence[Prior]], c
         logger.info(f"sample_posteriors: no init_centre given, the walkers of each target start from the best "
                     f"{cfg.nwalkers} of {_PRIOR_ROUNDS * cfg.nwalkers} prior draws")
 
-    x = torch.as_tensor(x, **f32)
+    x = to_tensor(x, **f32)
     results = []
     for i, start in enumerate(range(0, B, per)):
         sl = slice(start, min(B, start + per))
@@ -892,7 +892,7 @@ def _sample_batch(likelihood, x_obs, priors, low, high, cfg, mode, centre, sd, w
     gen = torch.Generator(device=device).manual_seed(int(seed))
     B, W, ndim = len(x_obs), cfg.nwalkers, low.shape[-1]
     uniq, which = _group(priors)
-    which = torch.as_tensor(which, device=device)
+    which = to_tensor(which, device=device)
     members = [which == i for i in range(len(uniq))]                        # (B,) masks: the targets of each prior
 
     if len(uniq) == 1:
@@ -933,14 +933,14 @@ def _sample_batch(likelihood, x_obs, priors, low, high, cfg, mode, centre, sd, w
     # initial walkers: proposals inside each target's prior support, redrawn where the full
     # log-probability (prior, likelihood, transform) is not finite
     if mode == "walkers":
-        init = torch.as_tensor(walkers, dtype=torch.float32, device=device)
+        init = to_tensor(walkers, dtype=torch.float32, device=device)
         propose = None
     elif mode == "prior":
         def propose():
             out = torch.empty((B, W, ndim), device=device)
             for p, m in zip(uniq, members):
                 n = int(m.sum())
-                out[m] = torch.as_tensor(p.sample(n * W, generator=gen), dtype=out.dtype).reshape(n, W, ndim)
+                out[m] = to_tensor(p.sample(n * W, generator=gen), dtype=out.dtype).reshape(n, W, ndim)
             if box is not None:
                 # a walker within ~1e-3 box widths of a bound lies far out in the logit, where a step of the
                 # ensemble's size hardly changes theta: it would need thousands of steps to reach a narrow posterior
@@ -950,10 +950,10 @@ def _sample_batch(likelihood, x_obs, priors, low, high, cfg, mode, centre, sd, w
     else:
         width = high - low
         pad = torch.where(torch.isfinite(width), 1e-4 * width, torch.zeros_like(width))
-        mid = torch.as_tensor(centre, dtype=torch.float32, device=device)[:, None]
+        mid = to_tensor(centre, dtype=torch.float32, device=device)[:, None]
         mid = torch.minimum(torch.maximum(mid, low + pad), high - pad)
         scale = cfg.init_scale * (width / 12 ** 0.5 if sd is None
-                                  else torch.as_tensor(sd, dtype=torch.float32, device=device)[:, None])
+                                  else to_tensor(sd, dtype=torch.float32, device=device)[:, None])
         shrink = torch.ones((B, 1, 1), device=device)
 
         def propose():

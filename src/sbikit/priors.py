@@ -55,7 +55,7 @@ from typing import Callable, Optional, Sequence
 import numpy as np
 import torch
 
-from ._utils import Registry, as_2d, as_numpy, check_finite, did_you_mean, logger, plain, resolve_device
+from ._utils import Registry, as_2d, as_numpy, check_finite, did_you_mean, logger, plain, resolve_device, to_tensor
 
 __all__ = ["Prior", "Gaussian", "KDE", "Polygon2D", "CurveBound2D", "loo_bandwidth", "TERMS", "CONSTRAINTS",
            "register_term", "register_constraint"]
@@ -103,7 +103,7 @@ def register_constraint(cls):
 
 
 def _t(a, device=None, dtype=torch.float32):
-    return torch.as_tensor(np.asarray(a) if not isinstance(a, torch.Tensor) else a, dtype=dtype, device=device)
+    return to_tensor(np.asarray(a) if not isinstance(a, torch.Tensor) else a, dtype=dtype, device=device)
 
 
 def _as_dims(dims, owner: str, n: Optional[int] = None) -> list:
@@ -260,7 +260,7 @@ def loo_bandwidth(centres, chol, grid=np.geomspace(0.02, 1.0, 60), *, max_points
         raise ValueError("loo_bandwidth needs at least 2 centres")
     if int(max_points) < 1:
         raise ValueError(f"max_points must be at least 1, got {max_points}")
-    z = torch.as_tensor(np.ascontiguousarray(np.linalg.solve(np.asarray(chol, dtype=np.float64), (c - c.mean(0)).T).T))
+    z = to_tensor(np.ascontiguousarray(np.linalg.solve(np.asarray(chol, dtype=np.float64), (c - c.mean(0)).T).T))
     rows = (np.arange(n) if n <= max_points
             else np.sort(np.random.default_rng(seed).choice(n, int(max_points), replace=False)))
     grid, step = np.unique(grid), max(1, _PAIRS // 4 // n)
@@ -738,7 +738,7 @@ class Prior:
         """(theta as a floating tensor, whether it was given as a tensor)."""
         is_tensor = isinstance(theta, torch.Tensor)
         if not is_tensor:
-            theta = torch.as_tensor(np.asarray(theta, dtype=np.float32), device=self.device)
+            theta = _t(np.asarray(theta, dtype=np.float32), self.device)
         elif not theta.is_floating_point():
             theta = theta.to(self.low.dtype)
         if theta.ndim == 0 or theta.shape[-1] != self.ndim:

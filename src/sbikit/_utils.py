@@ -229,6 +229,13 @@ def resolve_device(device=None) -> str:
 
 
 # ------------------------------------------------------------------------------ arrays
+def to_tensor(a, dtype=None, device=None) -> torch.Tensor:
+    """``torch.as_tensor`` that copies read-only arrays (torch warns about tensors sharing such memory)."""
+    if isinstance(a, np.ndarray) and not a.flags.writeable:
+        a = a.copy()
+    return torch.as_tensor(a, dtype=dtype, device=device)
+
+
 def as_numpy(a, dtype=np.float64) -> np.ndarray:
     """A numpy array from an array-like or a tensor (on any device, with or without grad)."""
     if isinstance(a, torch.Tensor):
@@ -314,7 +321,7 @@ def plain(obj: Any):
             return obj.tolist()
         if obj.dtype.kind == "O":
             return [plain(o) for o in obj.tolist()]
-        return torch.as_tensor(np.ascontiguousarray(obj)).clone()
+        return to_tensor(np.ascontiguousarray(obj)).clone()
     if isinstance(obj, np.generic):
         return obj.item()
     if isinstance(obj, pathlib.PurePath):

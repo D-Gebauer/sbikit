@@ -1,5 +1,6 @@
 """NLE and Ensemble: configs, flow registry, seeding, input checks, training options, scalers, states."""
 import logging
+import warnings
 
 import numpy as np
 import pytest
@@ -697,3 +698,33 @@ def test_ensemble_with_other_likelihoods(trained):
     expected = torch.logaddexp(trained.log_likelihood(s, theta), torch.zeros(10, device=trained.device)) - np.log(2)
     assert (ens.n_x, ens.n_theta, ens.fitted) == (3, 2, True)
     assert torch.allclose(ens.log_likelihood(s, theta), expected, atol=1e-5)
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_read_only_arrays_give_no_warning(dtype, device):
+    # torch warns (once per process) about tensors made from read-only arrays
+    from sbikit import Prior, sample_posteriors
+
+    def ro(a):
+        a = np.array(a, dtype=dtype)
+        a.setflags(write=False)
+        return a
+
+    s, theta = (ro(a) for a in _data())
+    always = torch.is_warn_always_enabled()
+    torch.set_warn_always(True)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            warnings.filterwarnings("ignore", message=".*did not converge.*")
+            nle = NLE(flow=SMALL, device=device, seed=0)
+            nle.fit(s, theta, train=FAST)
+            assert torch.isfinite(nle.log_likelihood(s, theta)).all()
+            cfg = {"nwalkers": 16, "burn_in": 10, "max_steps": 40, "thin": 1, "adaptive": False, "n_samples": 20}
+            prior = Prior(ro([-1, -1]), ro([1, 1]))
+            for start in ({"init_centre": theta[:2], "init_sd": ro([0.1, 0.1])}, {"init_centre": theta[0]},
+                          {"init_walkers": ro(np.random.default_rng(0).uniform(-0.5, 0.5, (16, 2)))}):
+                post = sample_posteriors(nle, s[:2], prior, cfg, verbose=False, **start)
+                assert post.samples.shape == (2, 20, 2)
+    finally:
+        torch.set_warn_always(always)

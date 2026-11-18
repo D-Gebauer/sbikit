@@ -20,7 +20,7 @@ import torch
 from sbi.neural_nets import net_builders as _sbi_builders
 
 from ._utils import (ConfigBase, NotFittedError, Registry, as_2d, as_numpy, check_pair, did_you_mean, holdout_split,
-                     logger, plain, resolve_device, seeded)
+                     logger, plain, resolve_device, seeded, to_tensor)
 from .scaling import make_scaler, scaler_from_state
 
 __all__ = ["FlowConfig", "TrainConfig", "NLE", "Ensemble", "FLOWS", "register_flow"]
@@ -266,7 +266,7 @@ def _log_det(scaler, x):
 
 
 def _tensor(a, device):
-    return torch.as_tensor(as_numpy(a, np.float32), device=device)
+    return to_tensor(as_numpy(a, np.float32), device=device)
 
 
 def _weights(module) -> dict:
@@ -331,8 +331,8 @@ class _Likelihood:
             raise ValueError(f"s has {len(s)} rows but theta has {len(theta)}; give matching rows or a single s")
         device, dtype = torch.device(self.device), self._eval_dtype
         with torch.no_grad():
-            out = [self.log_prob(torch.as_tensor(s[i:i + _CHUNK], dtype=dtype, device=device).unsqueeze(0),
-                                 torch.as_tensor(theta[i:i + _CHUNK], dtype=dtype, device=device)).reshape(-1)
+            out = [self.log_prob(to_tensor(s[i:i + _CHUNK], dtype=dtype, device=device).unsqueeze(0),
+                                 to_tensor(theta[i:i + _CHUNK], dtype=dtype, device=device)).reshape(-1)
                    for i in range(0, len(theta), _CHUNK)]
         return torch.cat(out).float()
 
@@ -646,7 +646,7 @@ class NLE(_Likelihood):
                 are not ``n_x`` and ``n_theta``, or if the numbers of rows differ and neither is 1.
         """
         self._check_fitted()
-        input, condition = torch.as_tensor(input, device=self.device), torch.as_tensor(condition, device=self.device)
+        input, condition = to_tensor(input, device=self.device), to_tensor(condition, device=self.device)
         if (input.ndim not in (2, 3) or condition.ndim != 2 or input.shape[-1] != self.n_x
                 or condition.shape[-1] != self.n_theta):
             raise ValueError(f"expected input (1, M, {self.n_x}) or (M, {self.n_x}) and condition (M, {self.n_theta}), "
@@ -823,7 +823,7 @@ class Ensemble(_Likelihood):
     def log_prob(self, input, condition):
         """Log of the weighted mean of the member likelihoods; same layout as :meth:`NLE.log_prob`."""
         lp = torch.stack([m.log_prob(input, condition) for m in self.members])
-        log_w = torch.log(torch.as_tensor(self.weights, dtype=lp.dtype, device=lp.device))
+        log_w = torch.log(to_tensor(self.weights, dtype=lp.dtype, device=lp.device))
         return torch.logsumexp(lp + log_w.reshape(-1, *[1] * (lp.ndim - 1)), 0)
 
     def to(self, device):

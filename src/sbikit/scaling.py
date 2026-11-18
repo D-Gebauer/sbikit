@@ -19,7 +19,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from ._utils import Registry
+from ._utils import Registry, to_tensor
 
 __all__ = ["ZScore", "RobustAsinh", "Identity", "SCALERS", "register_scaler", "make_scaler", "scaler_from_state"]
 
@@ -44,7 +44,7 @@ def _stats(x):
     """A float64 CPU tensor of the (N, D) data ``x`` (array-like or tensor on any device)."""
     if isinstance(x, torch.Tensor):
         return x.detach().cpu().double()
-    return torch.as_tensor(np.asarray(x, dtype=np.float64))
+    return to_tensor(np.asarray(x, dtype=np.float64))
 
 
 class Identity:
@@ -84,8 +84,8 @@ class ZScore:
     kind = "zscore"
 
     def __init__(self, mean=None, std=None, ddof: int = 0):
-        self.mean = None if mean is None else torch.as_tensor(mean, dtype=torch.float64)
-        self.std = None if std is None else torch.as_tensor(std, dtype=torch.float64)
+        self.mean = None if mean is None else to_tensor(mean, dtype=torch.float64)
+        self.std = None if std is None else to_tensor(std, dtype=torch.float64)
         self.ddof = ddof
 
     def fit(self, x):
@@ -135,8 +135,8 @@ class RobustAsinh:
 
     def __init__(self, k: float = 5.0, median=None, scale=None):
         self.k = float(k)
-        self.median = None if median is None else torch.as_tensor(median, dtype=torch.float64)
-        self.scale = None if scale is None else torch.as_tensor(scale, dtype=torch.float64)
+        self.median = None if median is None else to_tensor(median, dtype=torch.float64)
+        self.scale = None if scale is None else to_tensor(scale, dtype=torch.float64)
 
     def fit(self, x):
         """Take median and scale from the columns of ``x`` (N, D); returns itself."""
