@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sbikit"
+version = "0.1.0"
+description = "Simulation-based inference for cosmology: compression (MOPED, MSE, VMIM, hierarchical VMIM, IMNN), neural likelihood estimation, batched GPU ensemble MCMC, TARP and figure-of-merit metrics, Optuna hyperparameter searches"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "David Gebauer" }]
+keywords = ["simulation-based inference", "cosmology", "neural likelihood estimation", "normalising flows", "MCMC", "data compression"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+# torch comes in through sbi. To choose a particular build (CPU-only, a CUDA version), install
+# torch first from the matching index; see the README.
+dependencies = [
+    "numpy>=2.0",
+    "sbi>=0.27,<0.28",
+    "zuko>=1.6,<1.7",
+    "optuna>=4.0",
+    "torchemcee @ git+https://github.com/D-Gebauer/torchemcee@v0.1.1",   # >= 0.1.1: corrected snooker move
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "tarp @ git+https://github.com/maho3/tarp.git"]
+examples = ["matplotlib>=3.8", "ipykernel", "nbconvert"]
+
+[project.urls]
+Homepage = "https://github.com/D-Gebauer/sbikit"
+Repository = "https://github.com/D-Gebauer/sbikit"
+Issues = "https://github.com/D-Gebauer/sbikit/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: longer end-to-end tests (training + sampling)"]
+filterwarnings = ["ignore::DeprecationWarning", "ignore::UserWarning"]
