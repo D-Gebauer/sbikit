@@ -16,9 +16,6 @@ that they are calibrated.
 - **Utilities**: priors with density terms and support constraints, parameter transforms, parameter-level
   blinding, checkpoints that load with `weights_only=True`, run records.
 
-Each piece works on its own with numpy arrays in and out. sbikit does not load data, run forward models or decide
-how simulations are split: an analysis keeps those and calls sbikit for the inference.
-
 ## Contents
 
 - [Installation](#installation)
@@ -60,7 +57,7 @@ install `torch` first from the matching index (see [pytorch.org](https://pytorch
 sbikit.
 
 Dependencies: `numpy >= 2.0`, `sbi 0.27`, `zuko 1.6`, `optuna >= 4.0` and
-[`torchemcee`](https://github.com/D-Gebauer/torchemcee) `>= 0.1.1` (installed from GitHub). The `sbi` and `zuko`
+[`torchemcee`](https://github.com/D-Gebauer/torchemcee) `>= 0.1.1` (install from GitHub). The `sbi` and `zuko`
 versions are pinned because saved flows depend on their layer names.
 
 ## Quick start
@@ -354,25 +351,6 @@ configuration, versions, git hashes of sbikit and of the analysis repository, md
 of the splits, the host and the GPU.
 
 ## Notes on methods
-
-**TARP.** `tarp_f` implements the definition of Lemos et al. (2023) as the `tarp` package does with `norm=True`
-and random references, and reproduces its result exactly for every reference seed. On top of that, sbikit
-averages 50 reference draws by default (a single draw is noisy), computes the scalars from the statistic
-directly instead of from the coarse histogram, and bootstraps the simulations for errors. Two properties of the
-test to keep in mind: the normalisation uses the range of the test truths, so compare scalars rather than curves
-between test sets with different ranges; and uniform references are mostly far from the posteriors in many
-dimensions, which makes the test insensitive to miscalibration in weakly constrained directions. This is why
-`evaluate` also runs TARP on named subsets and reports marginal coverage.
-
-**Snooker move.** The default moves are differential evolution (weight 0.8) and the snooker update (0.2) of
-ter Braak & Vrugt (2008). The `DESnookerMove` of emcee 3.1.6 and of torchemcee 0.1.0 differs from that paper (it
-scales the proposal by `(x − z)/√|x − z|` instead of the unit vector, and uses the exponent `(d − 1)/2` instead of
-`d − 1`) and gives posteriors that are too narrow: on a flat 9-dimensional box, the standard deviation comes out
-16 % too small with the snooker move alone and 3 % too small in the 0.8/0.2 mix. torchemcee 0.1.1 has the
-corrected move, sbikit requires it, and the test suite checks every move and preset on that box to 1.5 %.
-
-**MOPED and IMNN are local.** Both are built at one fiducial point and are optimal only near it. Over a wide prior,
-compare them with a compressor trained on the whole parameter range.
 
 **Likelihood normalisation.** `NLE.log_prob` is the density of the z-scored summaries; the constant Jacobian of the
 scaling is left out. Posteriors are unaffected; add it if you compare likelihood values between models with
